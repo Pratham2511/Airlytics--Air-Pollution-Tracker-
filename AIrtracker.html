@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Air Quality Tracker</title>
+    <!-- Use Tailwind CSS for modern styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        inter: ['Inter', 'sans-serif'],
+                        'roboto-slab': ['"Roboto Slab"', 'serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@700&display=swap" rel="stylesheet">
+    <!-- Leaflet CSS for map styling -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .aqi-container {
+            transition: background-color 0.5s ease-in-out;
+        }
+        .aqi-good { background-color: #a7f3d0; }
+        .aqi-moderate { background-color: #fde68a; }
+        .aqi-unhealthy-sensitive { background-color: #fca5a5; }
+        .aqi-unhealthy { background-color: #f87171; }
+        .aqi-very-unhealthy { background-color: #c4b5fd; }
+        .aqi-hazardous { background-color: #9333ea; }
+        .aqi-hazardous h1, .aqi-very-unhealthy h1, .aqi-unhealthy h1 {
+            color: white;
+        }
+        #map-container {
+            width: 100%;
+            height: 100%; /* Fill available height */
+        }
+        /* Style for the pollution ranking slider */
+        #ranking-slider {
+            -webkit-overflow-scrolling: touch;
+        }
+        .pollutant-card {
+            transition: transform 0.2s ease-in-out;
+        }
+        .pollutant-card:hover {
+            transform: translateY(-5px);
+        }
+        /* Custom styles for the collapsible panel */
+        .panel-transition {
+            transition: transform 0.3s ease-in-out;
+        }
+        .panel-transition.collapsed {
+            transform: translateX(100%);
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center min-h-screen">
+
+    <!-- Header Section with border -->
+    <header class="w-full bg-white p-4 shadow-md border-b-2 border-gray-200">
+        <div class="container mx-auto flex flex-col md:flex-row items-center justify-between">
+            <div class="flex items-center mb-4 md:mb-0">
+                <h1 class="text-2xl font-extrabold text-gray-800 tracking-tight font-roboto-slab">Airlytics</h1>
+            </div>
+            <div class="w-full md:w-auto flex flex-col md:flex-row items-center space-y-4 md:space-y-0 md:space-x-4">
+                <div id="search-bar" class="relative rounded-md shadow-sm w-full md:w-auto">
+                    <input type="text" id="city-search" placeholder="Search for a city..." class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                    <button id="search-button" class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400">
+                        <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"></path></svg>
+                    </button>
+                </div>
+                <button id="my-location-button" class="w-full md:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-300 ease-in-out transform hover:scale-105">
+                    Get My Current Location's Air Quality
+                </button>
+                <!-- Toggle Button for the data panel -->
+                <button id="toggle-panel-button" class="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors duration-200">
+                    <svg id="toggle-icon" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main container for map and data -->
+    <div class="flex-1 w-full flex flex-col md:flex-row p-4 space-y-4 md:space-y-0 md:space-x-4 overflow-hidden">
+        <!-- Interactive Map -->
+        <div id="map-container" class="rounded-2xl shadow-xl overflow-hidden flex-1"></div>
+        
+        <!-- Data Display Container with scrollbar and toggle functionality -->
+        <div id="app-container" class="bg-white rounded-2xl shadow-xl w-full md:w-96 p-6 md:p-10 text-center flex-shrink-0 overflow-y-auto panel-transition md:transform-none">
+            <!-- Loading state -->
+            <div id="loading" class="hidden flex items-center justify-center space-x-2 text-gray-600 mb-8">
+                <div class="h-4 w-4 bg-blue-500 rounded-full animate-bounce" style="animation-delay: -0.3s;"></div>
+                <div class="h-4 w-4 bg-blue-500 rounded-full animate-bounce" style="animation-delay: -0.15s;"></div>
+                <div class="h-4 w-4 bg-blue-500 rounded-full animate-bounce"></div>
+                <span class="ml-2 text-sm">Fetching data...</span>
+            </div>
+    
+            <!-- Error message state -->
+            <div id="error-message" class="hidden text-red-500 p-4 bg-red-100 rounded-lg border border-red-200 mb-8">
+                <p><strong>Error:</strong> <span id="error-text"></span></p>
+            </div>
+    
+            <div id="data-container" class="hidden">
+                <!-- AQI main display -->
+                <div id="aqi-card" class="aqi-container rounded-2xl p-6 md:p-8 shadow-inner mb-6 transition-colors duration-500">
+                    <p class="text-xs md:text-sm font-semibold uppercase text-gray-700 mb-1">Current Air Quality Index</p>
+                    <h2 id="aqi-value" class="text-5xl md:text-6xl font-bold text-gray-900 leading-none">--</h2>
+                    <p id="aqi-status" class="text-lg md:text-xl font-bold mt-2"></p>
+                    <p id="city-name" class="text-sm md:text-base text-gray-600 mt-1"></p>
+                </div>
+                <!-- Auto-update timer message -->
+                <p id="update-message" class="text-xs text-gray-500 mt-2 hidden"></p>
+
+                <!-- Gemini API Button -->
+                <button id="gemini-advice-button" class="w-full bg-slate-800 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-300 ease-in-out transform hover:scale-105 mb-6 hidden">
+                    Get Health Recommendations ✨
+                </button>
+
+                <!-- Gemini API Response Section -->
+                <div id="gemini-advice-container" class="mt-4 hidden p-6 bg-blue-50 rounded-lg text-left shadow-sm">
+                    <h3 class="font-bold text-lg text-gray-800 mb-2">Personalized Advice</h3>
+                    <div id="gemini-advice-loading" class="hidden flex items-center justify-center space-x-2 text-gray-600">
+                        <div class="h-4 w-4 bg-blue-500 rounded-full animate-bounce" style="animation-delay: -0.3s;"></div>
+                        <div class="h-4 w-4 bg-blue-500 rounded-full animate-bounce" style="animation-delay: -0.15s;"></div>
+                        <div class="h-4 w-4 bg-blue-500 rounded-full animate-bounce"></div>
+                        <span class="ml-2 text-sm">Generating advice...</span>
+                    </div>
+                    <p id="gemini-advice-text" class="text-sm text-gray-700"></p>
+                </div>
+    
+                <!-- Pollutants grid -->
+                <div id="pollutants-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-6">
+                    <!-- Pollutant cards will be inserted here by JavaScript -->
+                </div>
+                
+                <!-- Health recommendations -->
+                <div class="mt-8 text-left p-6 bg-gray-50 rounded-lg">
+                    <h3 class="font-bold text-lg text-gray-800 mb-2">What the numbers mean:</h3>
+                    <ul class="text-sm text-gray-600 space-y-2">
+                        <li><span class="inline-block w-3 h-3 rounded-full bg-green-400 mr-2"></span> Good: $0-50$</li>
+                        <li><span class="inline-block w-3 h-3 rounded-full bg-yellow-400 mr-2"></span> Moderate: $51-100$</li>
+                        <li><span class="inline-block w-3 h-3 rounded-full bg-orange-400 mr-2"></span> Unhealthy for Sensitive Groups: $101-150$</li>
+                        <li><span class="inline-block w-3 h-3 rounded-full bg-red-400 mr-2"></span> Unhealthy: $151-200$</li>
+                        <li><span class="inline-block w-3 h-3 rounded-full bg-purple-400 mr-2"></span> Very Unhealthy: $201-300$</li>
+                        <li><span class="inline-block w-3 h-3 rounded-full bg-violet-600 mr-2"></span> Hazardous: $301+$</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const WAQI_TOKEN = "80cc3b11d289e2adb8e79dcdca5f2b3b37c6a3ba";
+            const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=";
+            const GEMINI_API_KEY = ""; // This will be provided by the environment
+
+            const mainApp = document.getElementById('main-app');
+            const searchBar = document.getElementById('search-bar');
+            const citySearchInput = document.getElementById('city-search');
+            const searchButton = document.getElementById('search-button');
+            const myLocationButton = document.getElementById('my-location-button');
+            const mapContainer = document.getElementById('map-container');
+            const appContainer = document.getElementById('app-container');
+            const togglePanelButton = document.getElementById('toggle-panel-button');
+            const toggleIcon = document.getElementById('toggle-icon');
+
+            const loadingIndicator = document.getElementById('loading');
+            const dataContainer = document.getElementById('data-container');
+            const errorContainer = document.getElementById('error-message');
+            const errorText = document.getElementById('error-text');
+            const aqiCard = document.getElementById('aqi-card');
+            const aqiValueEl = document.getElementById('aqi-value');
+            const aqiStatusEl = document.getElementById('aqi-status');
+            const cityNameEl = document.getElementById('city-name');
+            const pollutantsGrid = document.getElementById('pollutants-grid');
+            const updateMessageEl = document.getElementById('update-message');
+
+            const geminiAdviceButton = document.getElementById('gemini-advice-button');
+            const geminiAdviceContainer = document.getElementById('gemini-advice-container');
+            const geminiAdviceText = document.getElementById('gemini-advice-text');
+            const geminiAdviceLoading = document.getElementById('gemini-advice-loading');
+
+            const UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes in milliseconds
+            let currentAqiData = null;
+            let map;
+            let currentMarker;
+            let updateTimer;
+            let currentCoords = null;
+            let currentCity = null;
+
+            // Initialize the map on page load
+            function initializeMap() {
+                map = L.map('map-container').setView([20.5937, 78.9629], 5); // Default to India
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                }).addTo(map);
+
+                map.on('click', function(e) {
+                    const { lat, lng } = e.latlng;
+                    currentCoords = { lat, lon: lng };
+                    currentCity = null;
+                    fetchAirQualityDataByLocation(lat, lng, true);
+                });
+            }
+
+            // Call the initialization function when the page loads
+            initializeMap();
+
+            myLocationButton.addEventListener('click', () => {
+                dataContainer.classList.add('hidden');
+                errorContainer.classList.add('hidden');
+                loadingIndicator.classList.remove('hidden');
+                geminiAdviceContainer.classList.add('hidden');
+                geminiAdviceButton.classList.add('hidden');
+                currentAqiData = null;
+
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const lat = position.coords.latitude;
+                            const lon = position.coords.longitude;
+                            currentCoords = { lat, lon };
+                            currentCity = null;
+                            fetchAirQualityDataByLocation(lat, lon, true);
+                        },
+                        (error) => {
+                            loadingIndicator.classList.add('hidden');
+                            if (error.code === error.PERMISSION_DENIED) {
+                                displayError("Geolocation permission was denied. Please allow location access to get your air quality data.");
+                            } else {
+                                displayError(`Error getting your location: ${error.message}`);
+                            }
+                        }
+                    );
+                } else {
+                    loadingIndicator.classList.add('hidden');
+                    displayError("Geolocation is not supported by your browser.");
+                }
+            });
+
+            searchButton.addEventListener('click', () => {
+                const city = citySearchInput.value.trim();
+                if (city) {
+                    currentCity = city;
+                    currentCoords = null;
+                    fetchAirQualityDataByCity(city);
+                } else {
+                    displayError('Please enter a city name.');
+                }
+            });
+
+            // Allow hitting enter to search
+            citySearchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    searchButton.click();
+                }
+            });
+
+            // Event listener for the new Gemini API button
+            geminiAdviceButton.addEventListener('click', () => {
+                if (currentAqiData) {
+                    generateHealthAdvice(currentAqiData);
+                } else {
+                    displayError("Please fetch air quality data first.");
+                }
+            });
+
+            // Toggle functionality for the data panel
+            togglePanelButton.addEventListener('click', () => {
+                appContainer.classList.toggle('collapsed');
+                if (appContainer.classList.contains('collapsed')) {
+                    toggleIcon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />`;
+                } else {
+                    toggleIcon.innerHTML = `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />`;
+                }
+                // Force map resize after the panel transition
+                setTimeout(() => {
+                    map.invalidateSize();
+                }, 300); // 300ms matches the CSS transition duration
+            });
+
+            // Function to fetch data by location from the WAQI API
+            async function fetchAirQualityDataByLocation(lat, lon, moveMap = false) {
+                // Clear any existing auto-update timer
+                if (updateTimer) {
+                    clearInterval(updateTimer);
+                }
+
+                dataContainer.classList.add('hidden');
+                errorContainer.classList.add('hidden');
+                loadingIndicator.classList.remove('hidden');
+                geminiAdviceContainer.classList.add('hidden');
+                geminiAdviceButton.classList.add('hidden');
+                
+                const apiUrl = `https://api.waqi.info/feed/geo:${lat};${lon}/?token=${WAQI_TOKEN}`;
+                
+                try {
+                    const response = await fetch(apiUrl);
+                    const data = await response.json();
+                    
+                    if (data.status === 'ok' && data.data.aqi !== "-") {
+                        currentAqiData = data.data; // Store the data
+                        updateUI(currentAqiData);
+                        geminiAdviceButton.classList.remove('hidden');
+                        if (moveMap) {
+                            addMarker(data.data.city.geo[0], data.data.city.geo[1]);
+                        }
+                        startAutoUpdate();
+                    } else {
+                        displayError(data.data || "Could not retrieve air quality data. Please check your token or try again.");
+                        geminiAdviceButton.classList.add('hidden');
+                    }
+                } catch (err) {
+                    displayError("An error occurred while fetching data. Please check your network connection.");
+                    geminiAdviceButton.classList.add('hidden');
+                } finally {
+                    loadingIndicator.classList.add('hidden');
+                }
+            }
+            
+            // Function to fetch data by city from the WAQI API
+            async function fetchAirQualityDataByCity(city) {
+                // Clear any existing auto-update timer
+                if (updateTimer) {
+                    clearInterval(updateTimer);
+                }
+
+                dataContainer.classList.add('hidden');
+                errorContainer.classList.add('hidden');
+                loadingIndicator.classList.remove('hidden');
+                geminiAdviceContainer.classList.add('hidden');
+
+                const apiUrl = `https://api.waqi.info/feed/${city}/?token=${WAQI_TOKEN}`;
+
+                try {
+                    const response = await fetch(apiUrl);
+                    const data = await response.json();
+
+                    if (data.status === 'ok' && data.data.aqi !== "-") {
+                        currentAqiData = data.data; // Store the data
+                        updateUI(currentAqiData);
+                        geminiAdviceButton.classList.remove('hidden');
+                        addMarker(data.data.city.geo[0], data.data.city.geo[1]);
+                        startAutoUpdate();
+                    } else {
+                        displayError(`Could not find data for "${city}". Please try a different city name.`);
+                        geminiAdviceButton.classList.add('hidden');
+                    }
+                } catch (err) {
+                    displayError("An error occurred while fetching data. Please check your network connection.");
+                    geminiAdviceButton.classList.add('hidden');
+                } finally {
+                    loadingIndicator.classList.add('hidden');
+                }
+            }
+
+            // Function to start the auto-update timer
+            function startAutoUpdate() {
+                updateMessageEl.textContent = 'Auto-updating every 5 minutes...';
+                updateMessageEl.classList.remove('hidden');
+                updateTimer = setInterval(() => {
+                    if (currentCoords) {
+                        fetchAirQualityDataByLocation(currentCoords.lat, currentCoords.lon);
+                    } else if (currentCity) {
+                        fetchAirQualityDataByCity(currentCity);
+                    }
+                }, UPDATE_INTERVAL);
+            }
+
+            function addMarker(lat, lng) {
+                if (currentMarker) {
+                    map.removeLayer(currentMarker);
+                }
+                const marker = L.marker([lat, lng]).addTo(map);
+                marker.bindPopup(`<b>Air Quality Here</b>`).openPopup();
+                currentMarker = marker;
+                map.setView([lat, lng], 10);
+            }
+
+
+            // Function to update the UI with fetched data
+            function updateUI(data) {
+                const aqi = data.aqi;
+                const city = data.city.name;
+                const iaqi = data.iaqi;
+
+                aqiValueEl.textContent = aqi;
+                cityNameEl.textContent = city;
+
+                const { status, color, statusText } = getAqiStatus(aqi);
+                aqiStatusEl.textContent = statusText;
+                aqiStatusEl.style.color = color;
+
+                // Set the background color of the main AQI card
+                aqiCard.classList.remove('aqi-good', 'aqi-moderate', 'aqi-unhealthy-sensitive', 'aqi-unhealthy', 'aqi-very-unhealthy', 'aqi-hazardous');
+                if (status === 'good') aqiCard.classList.add('aqi-good');
+                else if (status === 'moderate') aqiCard.classList.add('aqi-moderate');
+                else if (status === 'unhealthy-sensitive') aqiCard.classList.add('aqi-unhealthy-sensitive');
+                else if (status === 'unhealthy') aqiCard.classList.add('aqi-unhealthy');
+                else if (status === 'very-unhealthy') aqiCard.classList.add('aqi-very-unhealthy');
+                else if (status === 'hazardous') aqiCard.classList.add('aqi-hazardous');
+                // For aqi-very-unhealthy and aqi-hazardous, the text color should be white for contrast
+                if (status === 'very-unhealthy' || status === 'unhealthy' || status === 'hazardous') {
+                    aqiStatusEl.classList.add('text-white');
+                    aqiValueEl.classList.add('text-white');
+                    cityNameEl.classList.add('text-white');
+                } else {
+                    aqiStatusEl.classList.remove('text-white');
+                    aqiValueEl.classList.remove('text-white');
+                    cityNameEl.classList.remove('text-white');
+                }
+                
+                // Clear previous pollutants and add new ones
+                pollutantsGrid.innerHTML = '';
+                for (const pollutant in iaqi) {
+                    if (iaqi[pollutant].v !== undefined) {
+                        const pollutantCard = createPollutantCard(pollutant, iaqi[pollutant].v);
+                        pollutantsGrid.appendChild(pollutantCard);
+                    }
+                }
+
+                // Show the data container
+                dataContainer.classList.remove('hidden');
+            }
+            
+            // Function to make the API call with retries
+            async function callGeminiApiWithRetry(payload, retries = 3) {
+                for (let i = 0; i < retries; i++) {
+                    try {
+                        const response = await fetch(`${GEMINI_API_URL}${GEMINI_API_KEY}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        if (response.ok) {
+                            return await response.json();
+                        }
+                    } catch (error) {
+                        console.error(`Attempt ${i + 1} failed:`, error);
+                        // Implement exponential backoff
+                        await new Promise(res => setTimeout(res, 1000 * Math.pow(2, i)));
+                    }
+                }
+                throw new Error('All retry attempts failed.');
+            }
+
+            // Function to generate health advice using the Gemini API
+            async function generateHealthAdvice(data) {
+                geminiAdviceContainer.classList.remove('hidden');
+                geminiAdviceLoading.classList.remove('hidden');
+                geminiAdviceText.textContent = '';
+
+                const aqi = data.aqi;
+                const dominantPollutant = data.iaqi.hasOwnProperty('pm25') ? 'PM2.5' : 'PM10'; // A simple way to get a dominant pollutant
+                const city = data.city.name;
+                
+                const userQuery = `I am in a city with an Air Quality Index (AQI) of ${aqi}. The primary pollutant is ${dominantPollutant}. Provide concise, actionable health recommendations for this level of air pollution. The recommendations should be in a single paragraph.`;
+                const systemPrompt = "Act as a public health expert. Your response should be a brief, single-paragraph summary of health recommendations based on the provided air quality data. Do not include a conversational introduction, just the advice.";
+
+                const payload = {
+                    contents: [{ parts: [{ text: userQuery }] }],
+                    tools: [{ "google_search": {} }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                };
+
+                try {
+                    const result = await callGeminiApiWithRetry(payload);
+                    const candidate = result?.candidates?.[0];
+
+                    if (candidate && candidate.content?.parts?.[0]?.text) {
+                        const text = candidate.content.parts[0].text;
+                        geminiAdviceText.textContent = text;
+                    } else {
+                        geminiAdviceText.textContent = "Could not generate advice. Please try again later.";
+                    }
+                } catch (error) {
+                    console.error('Error calling Gemini API:', error);
+                    geminiAdviceText.textContent = "An error occurred while generating advice. Please check your network and try again.";
+                } finally {
+                    geminiAdviceLoading.classList.add('hidden');
+                }
+            }
+
+
+            // Function to determine AQI status and colors
+            function getAqiStatus(aqi) {
+                if (aqi <= 50) return { status: 'good', color: '#16a34a', statusText: 'Good' };
+                if (aqi <= 100) return { status: 'moderate', color: '#f59e0b', statusText: 'Moderate' };
+                if (aqi <= 150) return { status: 'unhealthy-sensitive', color: '#f97316', statusText: 'Unhealthy for Sensitive Groups' };
+                if (aqi <= 200) return { status: 'unhealthy', color: '#ef4444', statusText: 'Unhealthy' };
+                if (aqi <= 300) return { status: 'very-unhealthy', color: '#8b5cf6', statusText: 'Very Unhealthy' };
+                return { status: 'hazardous', color: '#7e22ce', statusText: 'Hazardous' };
+            }
+
+            // Function to create a single pollutant card
+            function createPollutantCard(pollutant, value) {
+                const card = document.createElement('div');
+                card.className = 'bg-gray-100 rounded-lg p-4 shadow-sm text-left';
+                card.innerHTML = `
+                    <p class="text-xs font-semibold uppercase text-gray-500">${pollutant.toUpperCase()}</p>
+                    <p class="text-2xl font-bold text-gray-800">${Math.round(value)}</p>
+                `;
+                return card;
+            }
+
+            // Function to display an error message
+            function displayError(message) {
+                errorText.textContent = message;
+                errorContainer.classList.remove('hidden');
+                dataContainer.classList.add('hidden');
+                loadingIndicator.classList.add('hidden');
+            }
+        });
+    </script>
+</body>
+</html>
